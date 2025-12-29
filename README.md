@@ -4,6 +4,7 @@
 
 - 编程语言：`./programming_language.md`
 - 云原生：`./cloud_native.md`
+- AI：`./ai.md`
 - 存储：`./storage.md`
 - 数据库：`./database.md`
 - 网络：`./network.md`
@@ -25,6 +26,11 @@
 - **[案例二：基于GPU切片与显存强隔离的集群吞吐量优化](./cloud_native.md#案例二基于gpu切片与显存强隔离的集群吞吐量优化)** - GPU Slice, vGPU, Isolation
 - **[案例三：基于无侵入式Hook的AI任务性能实时分析](./cloud_native.md#案例三基于无侵入式hook的ai任务性能实时分析)** - Hook, Profiling, Observability
 - **[案例四：万级节点规模下的 ETCD 与 APIServer 读写性能优化](./cloud_native.md#案例四万级节点规模下的-etcd-与-apiserver-读写性能优化)** - ETCD, APIServer, Read/Write
+- **[案例五：高并发 Controller 的内存剪枝与处理链路优化](./cloud_native.md#案例五高并发-controller-的内存剪枝与处理链路优化)** - Controller, Trim, Watch
+- **[案例六：万卡级异构集群的 GPU 虚拟化与调度优化](./cloud_native.md#案例六万卡级异构集群的-gpu-虚拟化与调度优化)** - GPU Virtualization, Scheduling
+
+### AI
+- **[案例一：面向 Agentic AI 的 Serverless 弹性架构演进](./ai.md#案例一面向-agentic-ai-的-serverless-弹性架构演进)** - Agentic AI, Serverless, Elasticity
 
 ### 存储
 - **[案例一：去重分片架构优化 (No-Reroute Strategy)](./storage.md#案例一去重分片架构优化-no-reroute-strategy)** - No-Reroute, Backpressure, Failover
