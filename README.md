@@ -22,6 +22,9 @@
 
 ### 云原生
 - **[案例一：采集资源调优 (Resource Optimization)](./cloud_native.md#案例一采集资源调优-resource-optimization)** - Staggered Start, Object Pool, GOMEMLIMIT
+- **[案例二：基于GPU切片与显存强隔离的集群吞吐量优化](./cloud_native.md#案例二基于gpu切片与显存强隔离的集群吞吐量优化)** - GPU Slice, vGPU, Isolation
+- **[案例三：基于无侵入式Hook的AI任务性能实时分析](./cloud_native.md#案例三基于无侵入式hook的ai任务性能实时分析)** - Hook, Profiling, Observability
+- **[案例四：万级节点规模下的 ETCD 与 APIServer 读写性能优化](./cloud_native.md#案例四万级节点规模下的-etcd-与-apiserver-读写性能优化)** - ETCD, APIServer, Read/Write
 
 ### 存储
 - **[案例一：去重分片架构优化 (No-Reroute Strategy)](./storage.md#案例一去重分片架构优化-no-reroute-strategy)** - No-Reroute, Backpressure, Failover
