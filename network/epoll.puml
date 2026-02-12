@@ -1,0 +1,94 @@
+@startuml
+skinparam backgroundColor #EEEBDC
+skinparam handwritten false
+skinparam activity {
+  BackgroundColor<< User >> #FFFFE0
+  BackgroundColor<< Kernel >> #ADD8E6
+  BackgroundColor<< Struct >> #E6E6FA
+  BackgroundColor<< Hardware >> #FFCCCB
+  BorderColor black
+}
+skinparam note {
+  BackgroundColor #White
+  BorderColor #555
+}
+
+title epoll 工作原理 (RB-Tree & Callback)
+
+|#FFFFE0|User| 用户空间 (Application)
+|#ADD8E6|Kernel| 内核逻辑 (System Calls)
+|#E6E6FA|Struct| 内核数据结构 (epoll instance)
+|#FFCCCB|Hardware| 硬件/驱动 (Network Stack)
+
+|User|
+start
+:epoll_create();
+|Kernel|
+:创建 eventpoll 结构体;
+|Struct|
+:初始化:
+1. rbr (红黑树) - 存监控的 Socket
+2. rdllist (双向链表) - 存就绪事件;
+
+|User|
+:epoll_ctl(EPOLL_CTL_ADD, socket_fd);
+note right
+  注册要监听的 Socket
+  (例如监听新的连接或数据)
+end note
+
+|Kernel|
+:查找/插入红黑树 (O(logN));
+|Struct|
+:将 socket_fd 节点挂载到红黑树;
+|Kernel|
+:关键步骤: 注册回调函数;
+note right
+  在 Socket 的等待队列中
+  注册 **ep_poll_callback**
+  (这是 epoll 高效的秘密)
+end note
+
+|User|
+:epoll_wait(events, maxevents, timeout);
+|Kernel|
+:检查 rdllist (就绪链表);
+
+if (rdllist 为空?) then (Yes)
+  :进程挂起 (Sleep);
+  note left: 让出 CPU，等待被唤醒
+
+  |Hardware|
+  :.... (时间流逝) ....;
+  :网卡接收数据包 (Rx);
+  :DMA -> 硬中断 -> 软中断;
+  :协议栈处理 (TCP/IP);
+
+  |Kernel|
+  :数据到达 Socket;
+  :触发之前注册的 **ep_poll_callback**;
+
+  |Struct|
+  :将该 Socket 节点 (epitem)
+  **插入 rdllist (就绪链表)**;
+
+  |Kernel|
+  :唤醒等待在 epoll_wait 的进程;
+
+else (No, 链表里有数据)
+endif
+
+|Kernel|
+:将 rdllist 中的事件
+**拷贝 (Copy)** 到用户态 events 数组;
+note right
+  只拷贝就绪的事件
+  不需要像 select 那样遍历所有
+end note
+
+|User|
+:epoll_wait 返回就绪数量 N;
+:遍历 events[0...N-1] 处理业务;
+stop
+
+@enduml

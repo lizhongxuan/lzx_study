@@ -1,0 +1,105 @@
+@startuml
+skinparam backgroundColor #EEEBDC
+skinparam handwritten false
+skinparam activity {
+  BackgroundColor<< Hardware >> #FFCCCB
+  BackgroundColor<< Driver >> #90EE90
+  BackgroundColor<< Kernel >> #ADD8E6
+  BackgroundColor<< User >> #FFFFE0
+  BorderColor black
+}
+
+title Linux 网络数据包接收全流程 (Physical -> Application)
+
+|#FFE4E1|HW| 物理硬件层 (NIC/DMA)
+|#F0FFF0|Driver| 驱动与中断层 (Hard/Soft IRQ)
+|#E6E6FA|Kernel| 协议栈层 (IP/TCP/Socket)
+|#FFFACD|User| 用户应用层 (Application)
+
+|HW|
+start
+:数据包到达物理网卡 (NIC);
+note right
+  光信号转电信号
+  PHY/MAC层校验(FCS)
+end note
+
+:DMA (Direct Memory Access);
+note right
+  网卡直接将数据写入
+  内存中的 Ring Buffer
+  (无需CPU参与)
+end note
+
+:触发硬件中断 (Hard IRQ);
+
+|Driver|
+:CPU 响应中断，执行 ISR (中断处理程序);
+note right
+  1. 屏蔽当前网卡硬中断
+  2. 触发软中断 (NET_RX_SOFTIRQ)
+  3. 快速退出 (避免阻塞CPU)
+end note
+
+:内核调度软中断 (ksoftirqd);
+:进入 NAPI 轮询循环 (Poll);
+note right
+  从 Ring Buffer 批量读取数据
+  封装为内核结构体 sk_buff
+end note
+
+|Kernel|
+:netif_receive_skb (协议栈入口);
+
+if (有抓包程序? e.g., tcpdump) then (yes)
+  :复制一份给 AF_PACKET;
+  note left: 也就是在这里抓包
+endif
+
+:GRO (Generic Receive Offload);
+note right: 将多个小包合并为大包\n减少后续处理开销
+
+:IP层处理 (Layer 3);
+note right
+  1. 检查 IP 头校验和
+  2. Netfilter: PREROUTING 链
+end note
+
+if (路由判断: 目的IP是本机?) then (No, 转发)
+  :进入转发流程 (FORWARD);
+  stop
+else (Yes, 本地接收)
+  :Netfilter: INPUT 链;
+  note right: 防火墙规则过滤 (iptables)
+endif
+
+:传输层处理 (Layer 4 - TCP/UDP);
+note right
+  1. 剥离 IP 头
+  2. 根据 <源IP,源端口,目IP,目端口>
+     查找对应的 Socket
+  3. 处理 TCP 状态机 (ACK/SYN)
+end note
+
+:数据排入 Socket 接收缓冲区 (Receive Queue);
+
+:唤醒等待进程 (Wake Up);
+note right: 也就是 epoll_wait 或 read 返回
+
+|User|
+:应用程序调用 read() / recv();
+
+|Kernel|
+:上下文切换 (Context Switch);
+:Copy to User (数据拷贝);
+note right
+  将数据从内核空间拷贝到
+  用户空间缓冲区
+  (性能开销点)
+end note
+
+|User|
+:应用拿到数据，开始业务逻辑;
+stop
+
+@enduml

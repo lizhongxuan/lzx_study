@@ -1,0 +1,107 @@
+@startuml
+title CosmicEye 集成 Grafana 图表显示流程图
+autonumber
+
+' 定义参与者样式
+skinparam sequence {
+    LifeLineBackgroundColor White
+    ParticipantBackgroundColor White
+    ActorBackgroundColor White
+    BoxBackgroundColor #F5F5F5
+}
+
+actor "运维人员" as User
+participant "CosmicEye平台\n(Web/API)" as CE
+
+box "Grafana Server" #FFFACD
+    participant "Grafana Frontend\n(UI)" as GF
+    participant "Grafana Backend\n(API & Renderer)" as GB
+end box
+
+box "Kubernetes Cluster (监控环境)" #E6F2FF
+    participant "K8s API Server" as K8s
+    participant "Prometheus Server" as Prom
+end box
+
+== 阶段一：CosmicEye 自动化配置 Grafana & Prometheus ==
+
+User -> CE:  配置监控任务 (e.g., 添加 PostgreSQL 监控)
+activate CE
+
+note right of CE
+  1.1 调用 CreateMidMonitorJob
+  1.2 准备 Exporter 配置
+  1.3 准备 Grafana Dashboard/Data Source 配置
+end note
+
+' 部署 Exporter (参考前一个图，这里简化)
+CE -> K8s:  部署 Exporter & ServiceMonitor
+activate K8s
+K8s --> CE: 部署成功
+deactivate K8s
+
+' 配置 Prometheus 数据源
+CE -> GB:  调用 Grafana API:\n创建/更新 Prometheus 数据源
+activate GB
+note right of GB
+  URL: http://prometheus-k8s.monitoring.svc.cluster.local:9090
+  Auth: JWT Token (由 CE 生成)
+end note
+GB --> CE: 数据源创建成功
+deactivate GB
+
+' 配置 Grafana 仪表板
+CE -> GB:  调用 Grafana API:\n导入预设 Dashboard JSON
+activate GB
+note right of GB
+  仪表板路径映射、
+  变量、PromQL 查询定义
+end note
+GB --> CE: 仪表板导入成功
+deactivate GB
+deactivate CE
+
+== 阶段二：CosmicEye 页面内嵌 Grafana ==
+
+User -> CE: 访问 CosmicEye 监控页面
+activate CE
+CE -> CE:  生成 Grafana Embed URL (包含 JWT Token)
+note right of CE
+  通过 JWT Token 进行身份验证
+  包含 sub, email, role, groups[] 等声明
+end note
+CE --> User: 返回包含内嵌 Grafana 的 HTML 页面
+deactivate CE
+
+User -> GF:  浏览器加载 Grafana Embedded UI (iframe)
+activate GF
+GF -> GB:  Grafana UI 认证 (使用 Embed URL 中的 JWT Token)
+activate GB
+GB --> GF: 认证成功，加载仪表板配置
+deactivate GB
+
+== 阶段三：Grafana 数据采集与图表显示 ==
+
+loop 自动刷新周期 / 用户操作
+    GF -> GB:  请求仪表板数据 (通过 PromQL 查询)
+    activate GB
+
+    GB -> Prom:  执行 PromQL 查询
+    activate Prom
+    note right of Prom
+      PromQL: (e.g., `pg_stat_activity_count{db="mydb"}`)
+    end note
+
+
+
+
+    Prom --> GB:  返回 PromQL 查询结果 (时序数据)
+    deactivate Prom
+
+    GB --> GF:  返回图表数据
+    deactivate GB
+
+    GF -> User:  渲染并显示图表
+end
+
+@enduml

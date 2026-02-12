@@ -1,0 +1,75 @@
+@startuml
+skinparam backgroundColor #EEEBDC
+skinparam handwritten false
+skinparam activity {
+  BackgroundColor<< Hardware >> #FFCCCB
+  BackgroundColor<< Kernel >> #ADD8E6
+  BackgroundColor<< User >> #FFFFE0
+  BorderColor black
+}
+skinparam note {
+  BackgroundColor #White
+  BorderColor #555
+}
+
+title 零拷贝流程 (Zero Copy with sendfile & SG-DMA)
+
+|#FFFFE0|User| 用户空间 (User Space)
+|#ADD8E6|Kernel| 内核空间 (Kernel Space)
+|#FFCCCB|Hardware| 硬件层 (Hardware)
+
+|User|
+start
+:应用调用 sendfile();
+note right
+  目标: 将文件直接发往网络
+  替代了传统的 read() + write()
+end note
+
+:上下文切换 (User -> Kernel);
+
+|Kernel|
+:DMA 控制器请求;
+note right
+  CPU 通知磁盘控制器
+  读取数据
+end note
+
+|Hardware|
+:DMA 拷贝 (Disk -> Kernel Buffer);
+note right
+  **第一次拷贝 (DMA)**
+  硬盘数据 -> 内核页缓存 (Page Cache)
+  (CPU 不参与搬运)
+end note
+
+|Kernel|
+:构建描述符 (Descriptors);
+note right
+  **关键优化点!**
+  CPU **不拷贝** 实际数据到 Socket 缓冲区。
+  只将 **内存地址** 和 **长度** (描述符)
+  追加到 Socket Buffer。
+end note
+
+:通知网卡 DMA;
+
+|Hardware|
+:SG-DMA 拷贝 (Kernel Buffer -> NIC);
+note right
+  **第二次拷贝 (DMA)**
+  网卡直接根据描述符，
+  从页缓存读取数据到网卡。
+  (CPU 不参与搬运)
+end note
+
+:网卡发送数据 (Tx);
+
+|Kernel|
+:sendfile() 返回;
+
+|User|
+:上下文切换 (Kernel -> User);
+stop
+
+@enduml

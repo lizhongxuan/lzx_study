@@ -1,0 +1,178 @@
+@startuml
+skinparam backgroundColor #EEEBDC
+skinparam handwritten false
+skinparam defaultFontName "JetBrains Mono"
+skinparam linetype ortho
+
+skinparam activity {
+  BackgroundColor #FEFECE
+  BorderColor #A80036
+  ArrowColor #A80036
+  Radius 5
+}
+
+skinparam partition {
+  BackgroundColor white
+  BorderColor Black
+  FontColor Black
+}
+
+skinparam note {
+  BackgroundColor #FFFFAA
+  BorderColor #D0D0D0
+}
+
+title "Linux I/O Path: VFS to Block Layer Deep Dive (详细版)"
+
+|#LightSkyBlue|User Space (用户空间)|
+start
+:<b>Application</b>
+(Golang / Python / Rust / C);
+note right
+  数据在用户态缓冲区
+  (User Buffer)
+end note
+
+if (I/O Type?) then (Buffered I/O (标准))
+  :<b>C Standard Library (glibc)</b>
+  fread() / fwrite();
+  note right
+    用户态缓冲 (FILE*)
+    减少系统调用次数
+  end note
+else (Direct I/O (裸))
+endif
+
+:<b>System Call Interface</b>
+sys_read() / sys_write() / preadv() / io_uring;
+note left
+  上下文切换 (Context Switch)
+  User mode -> Kernel mode
+end note
+
+|#Plum|Kernel: VFS & Cache (虚拟文件系统)|
+:<b>VFS (Virtual File System)</b>
+vfs_write() / vfs_read();
+note right
+  <b>VFS 抽象层</b>
+  处理 struct file, dentry, inode
+  不关心底层是 ext4 还是 xfs
+end note
+
+if (Flag: O_DIRECT?) then (No (Buffered))
+  :<b>Page Cache (页缓存)</b>;
+  note right
+    <b>性能关键点</b>
+    - Read: 命中? 直接拷贝内存返回
+    - Write: 标记页为脏 (Dirty Page)
+    - 内存拷贝 (CPU Overhead)
+  end note
+
+  if (触发回写?) then (Yes (fsync/后台刷盘))
+    :<b>Writeback (回写机制)</b>
+    wb_workfn / pdflush;
+    note right
+      将脏页(Dirty Pages)
+      整理为待落盘数据
+    end note
+  else (No (Hit/Delayed))
+    stop
+  endif
+else (Yes (O_DIRECT))
+  :<b>Zero Copy / Bypass Cache</b>;
+  note right
+    绕过 Page Cache
+    DB/AI 场景常用
+    要求内存对齐
+  end note
+endif
+
+|#LightGreen|Kernel: File System (具体文件系统)|
+:<b>File System Layer</b>
+(Ext4, XFS, Btrfs);
+note left
+  <b>地址翻译 (Mapping)</b>
+  调用 ext4_map_blocks 等
+  文件偏移(File Offset) -> 逻辑块地址(LBA)
+end note
+
+:<b>构建 BIO (Build BIO)</b>
+<i>submit_bio()</i>;
+note right
+  <b>struct bio</b>
+  - 描述<b>逻辑</b> I/O 请求
+  - 包含: 内存页(vec), 目标设备,
+    起始扇区, 数据长度
+end note
+
+|#LightYellow|Kernel: Block Layer (通用块层)|
+:<b>Generic Block Layer Entry</b>
+<i>generic_make_request / submit_bio_noacct</i>;
+
+partition "BIO 处理与合并逻辑" {
+    :<b>检查 BIO 大小</b>;
+    if (BIO > max_sectors?) then (Yes (过大))
+      :<b>BIO Split (拆分)</b>;
+      note left
+        硬件单次传输有限制
+        将大 bio 切割为多个小 bio
+      end note
+    else (No)
+    endif
+
+    :<b>进入 I/O 调度器 / 请求队列</b>
+    (I/O Scheduler / Request Queue);
+
+    if (能合并到现有 Request?) then (Yes (Merge))
+      :<b>BIO Merge (合并)</b>
+      (Elevator Merge);
+      note right
+        <b>核心优化</b>
+        发现队列中已有相邻扇区的 Request
+        将当前 bio 追加到该 Request 尾部
+        <b>无需创建新 Request</b>
+      end note
+    else (No (New Request))
+      :<b>创建新 Request</b>
+      <i>struct request = new request(bio)</i>;
+      note left
+        <b>struct request</b>
+        - 描述<b>物理</b> I/O 指令
+        - 一个 Request 包含 1 到 N 个 bio
+      end note
+
+      :<b>插入调度队列 (Sort/Insert)</b>;
+      note left
+        按 LBA 排序 (电梯算法)
+        或按优先级 (CFQ/BFQ)
+      end note
+    endif
+}
+
+:<b>分发 (Dispatch)</b>
+从软件队列 -> 硬件分发队列;
+
+:<b>Block Device Driver</b>
+(virtio-blk, nvme, sd);
+note right
+  从 Request 中提取散列表(Scatter-Gather)
+  写入硬件寄存器 / 提交 NVMe SQ
+end note
+
+|#LightGray|Hardware (硬件层)|
+:<b>DMA Transfer</b>
+(Direct Memory Access);
+note left
+  DMA 控制器搬运数据
+  RAM <-> Device Buffer
+  不占用 CPU
+end note
+
+:<b>Storage Controller</b>
+(NVMe Controller / HBA);
+
+:<b>Physical Media</b>
+(NAND Flash / Platter);
+
+stop
+@enduml

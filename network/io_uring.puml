@@ -1,0 +1,116 @@
+@startuml
+skinparam backgroundColor #EEEBDC
+skinparam handwritten false
+skinparam activity {
+  BackgroundColor<< User >> #FFFFE0
+  BackgroundColor<< Shared >> #E0FFFF
+  BackgroundColor<< Kernel >> #ADD8E6
+  BackgroundColor<< Hardware >> #FFCCCB
+  BorderColor black
+}
+skinparam note {
+  BackgroundColor #White
+  BorderColor #555
+}
+
+title io_uring 工作流程 (Submission & Completion Ring)
+
+|#FFFFE0|User| 用户空间 (Application)
+|#E0FFFF|Shared| 共享内存区域 (Ring Buffers)
+|#ADD8E6|Kernel| 内核空间 (Kernel)
+
+|User|
+start
+:获取一个空闲的 SQE;
+note right
+  **SQE (Submission Queue Entry)**
+  包含 I/O 操作的所有细节:
+  操作码 (OP_READ), fd, 地址, 长度
+end note
+
+:填充 SQE 数据;
+
+|Shared|
+:将 SQE 放入 Submission Ring;
+note right
+  **第一步交互**
+  用户作为生产者 (Producer)
+  向 SQ 环形缓冲区写入请求
+end note
+
+|User|
+:更新 SQ Tail (尾部指针);
+note right: 告诉内核有新请求了
+
+if (如果是 SQPOLL 模式?) then (Yes)
+  :无需系统调用;
+  note left
+    内核线程会在后台
+    自动轮询 SQ Ring
+  end note
+else (No, 默认模式)
+  :调用 io_uring_enter();
+  note left
+    **仅这一个系统调用**
+    用于提交和等待
+  end note
+endif
+
+|Kernel|
+:从 SQ Ring 读取 SQE;
+note left
+  **第二步交互**
+  内核作为消费者 (Consumer)
+  获取请求
+end note
+
+:解析并执行异步 I/O;
+note right: 将任务分发给具体设备驱动
+
+fork
+  :设备进行 DMA 操作;
+fork again
+  :内核继续处理其他请求 (非阻塞);
+end fork
+
+:I/O 完成 (数据已就绪);
+
+:生成 CQE;
+note right
+  **CQE (Completion Queue Entry)**
+  包含结果:
+  user_data (原样返回), res (返回值/错误码)
+end note
+
+|Shared|
+:将 CQE 放入 Completion Ring;
+note right
+  **第三步交互**
+  内核作为生产者
+  向 CQ 环形缓冲区写入结果
+end note
+
+:更新 CQ Tail;
+
+|User|
+:检查 CQ Head (头部指针);
+
+if (CQ Ring 有数据?) then (Yes)
+  |Shared|
+  :从 CQ Ring 读取 CQE;
+  note right
+    **第四步交互**
+    用户作为消费者
+    获取结果
+  end note
+
+  |User|
+  :更新 CQ Head;
+  :处理业务逻辑 (回调/协程);
+else (No)
+  :继续做其他事 或 等待;
+endif
+
+stop
+
+@enduml

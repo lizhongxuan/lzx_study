@@ -1,0 +1,73 @@
+@startuml
+title PG 物理备份 - 交互流程
+autonumber
+
+actor 用户
+participant "KME 接口" as KME
+participant "工作流引擎" as WF
+database "KME 数据库" as DB
+participant "Agent(备份机)" as A_Backup
+participant "Agent(PG 主机)" as A_PG
+participant "Postgres" as PG
+participant "备份仓库" as Repo
+
+用户 -> KME: 触发物理备份(inst_id, policy)
+KME -> WF: 创建流程实例
+WF -> DB: 插入 backup_task(status=Running)
+
+== 校验与加锁 ==
+WF -> KME: 步骤 ValidateAndLock
+KME -> DB: 校验运行中任务\n加实例锁
+alt 校验失败
+  KME -> DB: 更新 backup_task(status=Failed, err)
+  WF <-- KME: 步骤失败
+  return
+end
+
+== 备份仓库准备 ==
+WF -> A_Backup: 步骤 PrepareRepo(repo_path, tool_version)
+A_Backup -> Repo: 初始化仓库 / stanza-create
+A_Backup -> WF: 上报步骤结果(success, log_ref)
+
+== 主机准备 ==
+WF -> A_PG: 步骤 PrepareHost(pg_user, ssh, deps)
+A_PG -> PG: 创建用户/权限检查
+A_PG -> WF: 上报步骤结果(success, log_ref)
+
+== 应用配置 ==
+WF -> A_Backup: 步骤 ConfigApply(备份机配置)
+A_Backup -> Repo: 写入 pgbackrest.conf
+A_Backup -> WF: 上报步骤结果(success)
+
+WF -> A_PG: 步骤 ConfigApply(PG 主机配置)
+A_PG -> PG: 写入 pgbackrest.conf
+A_PG -> WF: 上报步骤结果(success)
+
+== 执行备份 ==
+WF -> A_Backup: 步骤 RunBackup(type=full/diff/incr)
+A_Backup -> PG: pgbackrest 备份
+A_Backup -> Repo: 写入备份数据/WAL
+A_Backup -> WF: 上报步骤结果(success, label, size, duration)
+alt 备份失败
+  A_Backup -> WF: 上报步骤结果(failed, err)
+  WF -> DB: 更新 backup_task(status=Failed, err)
+  return
+end
+
+== 校验(可选) ==
+WF -> A_Backup: 步骤 VerifyBackup(label)
+A_Backup -> Repo: pgbackrest check/verify
+A_Backup -> WF: 上报步骤结果(success)
+
+== 保留策略 ==
+WF -> A_Backup: 步骤 Retention(policy)
+A_Backup -> Repo: pgbackrest expire
+A_Backup -> WF: 上报步骤结果(success)
+
+== 收尾 ==
+WF -> KME: 步骤 Finalize
+KME -> DB: 更新 backup_task(status=Success, meta)
+KME -> DB: 释放锁
+KME -> WF: 步骤成功
+
+@enduml
